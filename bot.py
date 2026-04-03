@@ -1,22 +1,52 @@
-import asyncio
-from aiogram import Bot, Dispatcher, types
+from flask import Flask, request
+import requests
 import os
 
-TOKEN = os.getenv("BOT_TOKEN")   # Токен твоего бота
-FORWARD_TO = 6882565528         # Кому пересылать
-WATCH_USER = 651824873         # Кого отслеживаем
+TOKEN = os.getenv("BOT_TOKEN")  # токен бота от BotFather
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+app = Flask(__name__)
 
-@dp.message()
-async def forward_messages(message: types.Message):
-    if message.from_user and message.from_user.id == WATCH_USER:
-        await message.forward(FORWARD_TO)
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.json
 
-async def main():
-    print("Бот работает 🚀")
-    await dp.start_polling(bot)
+    if "business_message" in data:
+        msg = data["business_message"]
+        chat_id = msg["chat"]["id"]
+        text = msg.get("text") or "<не текст>"
+        business_connection_id = msg["business_connection_id"]
+
+        send_text = f"Пользователь написал: {text}"
+        payload = {
+            "chat_id": chat_id,
+            "business_connection_id": business_connection_id,
+            "text": send_text
+        }
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=payload)
+
+    if "deleted_business_messages" in data:
+        deleted = data["deleted_business_messages"]
+        for item in deleted:
+            payload = {
+                "chat_id": item["chat"]["id"],
+                "business_connection_id": item["business_connection_id"],
+                "text": f"❌ Сообщение {item['message_id']} удалено"
+            }
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=payload)
+
+    if "edited_business_message" in data:
+        msg = data["edited_business_message"]
+        chat_id = msg["chat"]["id"]
+        old_text = msg.get("old_text", "<неизвестно>")
+        new_text = msg.get("text", "<не текст>")
+        payload = {
+            "chat_id": chat_id,
+            "business_connection_id": msg["business_connection_id"],
+            "text": f"✏️ Сообщение изменено\nOLD: {old_text}\nNEW: {new_text}"
+        }
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=payload)
+
+    return "", 200
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
