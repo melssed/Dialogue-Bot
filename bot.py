@@ -1,9 +1,8 @@
 from flask import Flask, request
-import requests
 import os
+import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 app = Flask(__name__)
 
 @app.route("/", methods=["GET"])
@@ -13,10 +12,8 @@ def home():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
+    print("🔥 ПРИШЛО:", data)  # Логирование в Railway
 
-    print("🔥 ПРИШЛО:", data)  # ВАЖНО — будет в логах
-
-    # обычные сообщения
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "не текст")
@@ -28,5 +25,8 @@ def webhook():
                 "text": f"Получил: {text}"
             }
         )
+    return "OK", 200
 
-    return "ok", 200
+if __name__ == "__main__":
+    # Важно: использовать host=0.0.0.0 и порт из окружения Railway
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
