@@ -3,14 +3,16 @@ import os
 import aiosqlite
 from aiogram import Bot, Dispatcher, types
 
+# --- ПЕРЕМЕННАЯ ОКРУЖЕНИЯ ---
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 6882565528  # твой ID
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 DB_NAME = "messages.db"
 
-# --- БАЗА ---
+# --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ---
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
@@ -23,13 +25,12 @@ async def init_db():
         """)
         await db.commit()
 
-# --- СОХРАНЕНИЕ ---
+# --- СОХРАНЕНИЕ СООБЩЕНИЯ ---
 async def save_message(message: types.Message):
     text = message.text or message.caption
-
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
-        INSERT INTO messages VALUES (?, ?, ?, ?)
+        INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?)
         """, (
             message.message_id,
             message.chat.id,
@@ -38,43 +39,63 @@ async def save_message(message: types.Message):
         ))
         await db.commit()
 
-# --- ВСЕ СООБЩЕНИЯ ---
+# --- ОБРАБОТКА НОВЫХ СООБЩЕНИЙ ---
 @dp.message()
-async def handle(message: types.Message):
+async def handle_message(message: types.Message):
     await save_message(message)
 
-# --- ОТСЛЕЖИВАНИЕ ИЗМЕНЕНИЙ ---
+# --- ОБРАБОТКА ИЗМЕНЕННЫХ СООБЩЕНИЙ ---
 @dp.edited_message()
-async def edited(message: types.Message):
+async def handle_edited(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
-        cur = await db.execute("""
-        SELECT text FROM messages
-        WHERE message_id=? AND chat_id=?
-        """, (message.message_id, message.chat.id))
-        
+        cur = await db.execute(
+            "SELECT text FROM messages WHERE message_id=? AND chat_id=?",
+            (message.message_id, message.chat.id)
+        )
         row = await cur.fetchone()
-
+        new_text = message.text or message.caption
         if row:
             old_text = row[0]
-            new_text = message.text or message.caption
+            if old_text != new_text:
+                # обновляем базу
+                await db.execute(
+                    "UPDATE messages SET text=? WHERE message_id=? AND chat_id=?",
+                    (new_text, message.message_id, message.chat.id)
+                )
+                await db.commit()
+                # уведомление
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"✏️ Сообщение изменено\n\nOLD:\n{old_text}\nNEW:\n{new_text}"
+                )
 
-            # обновляем базу
-            await db.execute("""
-            UPDATE messages SET text=?
-            WHERE message_id=? AND chat_id=?
-            """, (new_text, message.message_id, message.chat.id))
-            await db.commit()
+# --- ПРОВЕРКА УДАЛЕННЫХ СООБЩЕНИЙ В ГРУППАХ ---
+async def check_deleted_messages():
+    while True:
+        await asyncio.sleep(30)  # проверка каждые 30 секунд
+        async with aiosqlite.connect(DB_NAME) as db:
+            async with db.execute("SELECT chat_id, message_id FROM messages") as cursor:
+                async for chat_id, message_id in cursor:
+                    try:
+                        await bot.get_message(chat_id, message_id)
+                    except:
+                        # сообщение удалено
+                        await bot.send_message(
+                            ADMIN_ID,
+                            f"❌ Сообщение {message_id} удалено из чата {chat_id}"
+                        )
+                        # удаляем из базы
+                        await db.execute(
+                            "DELETE FROM messages WHERE chat_id=? AND message_id=?",
+                            (chat_id, message_id)
+                        )
+                        await db.commit()
 
-            # 🔥 УВЕДОМЛЕНИЕ
-            await message.answer(
-                f"✏️ Сообщение изменено\n\n"
-                f"OLD:\n{old_text}\n\n"
-                f"NEW:\n{new_text}"
-            )
-
-# --- СТАРТ ---
+# --- СТАРТ БОТА ---
 async def main():
     await init_db()
+    # запускаем проверку удалённых сообщений параллельно
+    asyncio.create_task(check_deleted_messages())
     print("Бот работает 🚀")
     await dp.start_polling(bot)
 
