@@ -4,7 +4,7 @@ import os
 
 TOKEN = os.getenv("BOT_TOKEN")   # Токен твоего бота
 FORWARD_TO = 6882565528         # Кому пересылать
-WATCH_USER = 6234173903         # Кого отслеживаем
+WATCH_USER = 651824873         # Кого отслеживаем
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
